@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paper Crawler</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header id="header">
+            <h1 id="paper-title"></h1>
+            <div id="paper-meta"></div>
+        </header>
+
+        <main>
+            <div id="paper-view">
+                <!-- Paper content will be loaded here -->
+            </div>
+
+            <div id="markup-layer"></div>
+
+            <canvas id="spider-canvas" width="800" height="600"></canvas>
+        </main>
+
+        <aside id="analyst-panel">
+            <div class="panel-header">
+                <span id="section-label">▸ crawling: TL;DR</span>
+                <button id="panel-toggle">◀</button>
+            </div>
+            <div id="analyst-content">
+                <div id="explanation-text"></div>
+                <div id="key-phrase"></div>
+            </div>
+        </aside>
+
+        <div id="key-hint">?</div>
+    </div>
+
+    <script type="module" src="js/loader.js"></script>
+    <script type="module" src="js/crawler.js"></script>
+    <script type="module" src="js/spider-draw.js"></script>
+    <script type="module" src="js/analyst.js"></script>
+</body>
+</html>

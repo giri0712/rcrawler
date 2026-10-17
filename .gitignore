@@ -1,0 +1,32 @@
+# Environment variables
+.env
+
+# Cache directory
+cache/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Papers directory (optional - uncomment if you don't want to version papers)
+# papers/
+
+# Miscellaneous
+*.tmp
+*.bak
+*.swp
+
+# IDE folders
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
