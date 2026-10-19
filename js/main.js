@@ -133,6 +133,11 @@ class PaperCrawlerApp {
         document.addEventListener('toggle-follow', () => this.toggleFollow());
         document.addEventListener('toggle-pause', () => this.togglePause());
 
+        // Override analyst panel placeholder methods with real implementations
+        this.analystPanel.highlightKeyPhrase = (phrase) => this.highlightKeyPhrase(phrase);
+        this.analystPanel.scrollToSection = (sectionTitle) => this.scrollToSection(sectionTitle);
+    }
+
         // Listen for keyboard shortcuts that bypass analyst panel
         document.addEventListener('keydown', (e) => {
             // Skip if modifier keys are held or focus is in input
@@ -289,9 +294,13 @@ class PaperCrawlerApp {
     }
 
     getSectionText(sectionSlug, level) {
-        // This would extract the actual text for a given section
-        // For now, return a placeholder
-        return `Section content for ${sectionSlug} would be extracted here.`;
+        // Find the section with matching slug and return its text
+        const section = this.paperLoader.sections.find(sec => sec.slug === sectionSlug);
+        if (section) {
+            return section.text;
+        }
+        // Fallback if section not found
+        return `Section content for ${sectionSlug} not found.`;
     }
 
     requestExplanation(data) {
@@ -376,11 +385,24 @@ class PaperCrawlerApp {
 
         if (foundIndex !== -1) {
             // Found the word - command spider to move to it
-            // This would need to be implemented in SpiderCrawler
-            console.log(`Navigating to key phrase at word index: ${foundIndex}`);
+            const wordSpan = wordSpans[foundIndex];
+            if (wordSpan) {
+                const rect = wordSpan.getBoundingClientRect();
+                const docX = rect.left + window.scrollX;
+                const docY = rect.top + window.scrollY;
 
-            // For now, we'll just highlight it visually
-            this.highlightWordSpan(foundIndex, keyPhrase);
+                // Calculate center of the word
+                const targetX = docX + rect.width / 2;
+                const targetY = docY + rect.height / 2;
+
+                // Command spider to move to this position
+                if (this.spiderCrawler) {
+                    this.spiderCrawler.setTargetPosition(targetX, targetY);
+                }
+
+                // Also highlight it visually
+                this.highlightWordSpan(foundIndex, keyPhrase);
+            }
         }
     }
 
@@ -398,6 +420,49 @@ class PaperCrawlerApp {
             wordSpan.classList.remove('m-blowup');
         }, 3000);
     }
+
+    /**
+     * Scroll to make a section visible in the paper view
+     * @param {string} sectionTitle - Title of the section to scroll to
+     */
+    scrollToSection(sectionTitle) {
+        // Find the section element in the paper view
+        const paperView = document.getElementById('paper-view');
+        if (!paperView) return;
+
+        // Look for the section by searching for elements containing the title
+        const sectionElements = paperView.querySelectorAll('*');
+        let targetElement = null;
+
+        for (const element of sectionElements) {
+            if (element.textContent && element.textContent.includes(sectionTitle)) {
+                // Prefer heading-like elements
+                if (element.tagName.match(/^H[1-6]$/) ||
+                    element.classList.contains('ltx_section') ||
+                    element.classList.contains('ltx_title')) {
+                    targetElement = element;
+                    break;
+                }
+                // Fallback to first match
+                if (!targetElement) {
+                    targetElement = element;
+                }
+            }
+        }
+
+        if (targetElement) {
+            // Smooth scroll to the element
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            // Fallback: just scroll to top if section not found
+            paperView.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }
+
+    /**
+     * Show error message to user
+     * @param {string} message - Error message to display
+     */
 
     updatePaperMetadata(metadata) {
         const titleElement = document.getElementById('paper-title');

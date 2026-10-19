@@ -22,6 +22,12 @@ const CONFIG = {
     stepDuration: 0.15,      // Time for step lift-swing-plant (seconds)
     stepThreshold: 20,       // Distance to trigger a step
 
+    // Gait properties
+    // tetrapodGroups: [        // Tetrapod gait groups: [groupA, groupB] where each group contains leg indices that move together
+    //     [0, 3, 4, 7],        // Group A: legs 0, 3, 4, 7 (LF, RR, LM, RM) - 0-based indexing
+    //     [1, 2, 5, 6]         // Group B: legs 1, 2, 5, 6 (RF, LR, LB, RB)
+    // ]
+
     // Thread properties
     threadLength: 100,       // Initial thread length
     threadSwayFreq: 0.5,     // Thread sway frequency
@@ -34,6 +40,61 @@ const CONFIG = {
 
     // Debug
     debug: false             // Show debug info
+};
+
+// Import SpiderDrawer for rendering
+let SpiderDrawer;
+if (typeof window !== 'undefined' && window.SpiderDrawer) {
+    SpiderDrawer = window.SpiderDrawer;
+}
+
+// Smart targeting patterns for markup effects and notes
+const TARGETS = {
+    // Metrics and results patterns
+    metrics: [
+        /\b\d+(\.\d+)?\s*(%|percent)\b/,                    // percentages: 92.1%, 50%
+        /\b\d+(\.\d+)?\s*(BLEU|ROUGE|F1|accuracy|precision|recall)\b/, // metrics
+        /\b(state.of.the\.art|SOTA)\b/i,                    // state-of-the-art
+        /\b(\+|-)?\d+(\.\d+)?\s*(improvement|gain|boost)\b/i, // improvements
+        /\b\d+(\.\d+)?\s*(MB|GB|TFLOPS|GFLOPS)\b/i,       // hardware metrics
+    ],
+
+    // Model and method names
+    models: [
+        /\b(Transformer|BERT|GPT-\d+|LoRA|ResNet|ViT|CNN|RNN|LSTM|GRU)\b/, // architectures
+        /\b[ACEGHJ-PR-TV-Z][a-z]+(?:\s*[ACEGHJ-PR-TV-Z][a-z]+)*\s*(Net|Networks?|Model)\b/i, // CamelCase models
+        /\b[A-Z]{2,}(?:\s*[A-Z]{2,})*\b/,                  // ALL-CAPS acronyms (min 2 letters)
+    ],
+
+    // Datasets
+    datasets: [
+        /\b(ImageNet|COCO|Cityscapes|WMT\d+\s*\w*|GLUE|SQuAD|MNIST|CIFAR-\d+)\b/, // common datasets
+        /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+Dataset\b/i,   // X Y Dataset format
+    ],
+
+    // Citations and equations
+    references: [
+        /\[\d+(?:[-,]\d+)*\]/,                           // [1], [1-3], [1,3,5]
+        /\([^)]*et\s+al\.\,?\s*\d{4}\)/,                  // (Vaswani et al., 2017)
+        /\(?\d+\.?\d*\)/,                                // (1), (2.3)
+    ],
+
+    // Claim phrases (multi-word)
+    claims: [
+        /we\s+(propose|introduce|show|demonstrate|achieve|outperform)/i,
+        /(novel|new|our)\s+(approach|method|model|framework)/i,
+        /results?\s+show/i,
+        /significant(ly)?\s+(better|improvement)/i,
+    ]
+};
+
+// Groups of words that should get extra weight for dramatic effects
+const EFFECT_WEIGHTS = {
+    metrics: 3,
+    models: 2,
+    datasets: 2,
+    references: 1,
+    claims: 3
 };
 
 class SpiderCrawler {
@@ -81,11 +142,12 @@ class SpiderCrawler {
     initSpider() {
         // Initialize 8 legs (4 pairs)
         this.legs = [];
+        let legIndex = 0;
         for (let i = 0; i < 4; i++) {
             // Left side legs (negative offset)
             this.legs.push({
                 side: 'left',
-                index: i,
+                index: legIndex++,
                 offset: -((i * 2 + 1) * CONFIG.legSpacing),
                 joints: [ // [body joint, knee, foot]
                     { x: 0, y: 0 },
@@ -100,7 +162,7 @@ class SpiderCrawler {
             // Right side legs (positive offset)
             this.legs.push({
                 side: 'right',
-                index: i,
+                index: legIndex++,
                 offset: ((i * 2 + 1) * CONFIG.legSpacing),
                 joints: [
                     { x: 0, y: 0 },
@@ -255,8 +317,28 @@ class SpiderCrawler {
         }
 
         // Update body position
-        this.bodyPos.x += this.velocity.x * (deltaTime / 1000);
-        this.bodyPos.y += this.velocity.y * (deltaTime / 1000);
+        if (this.hasTarget && this.targetPosition) {
+            // Move towards target position
+            const dx = this.targetPosition.x - this.bodyPos.x;
+            const dy = this.targetPosition.y - this.bodyPos.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance > 5) { // Only move if not close enough
+                const moveSpeed = this.speed * 2; // Faster movement for navigation
+                this.bodyPos.x += (dx / distance) * moveSpeed * (deltaTime / 1000);
+                this.bodyPos.y += (dy / distance) * moveSpeed * (deltaTime / 1000);
+
+                // Update heading to face target
+                this.heading = Math.atan2(dy, dx);
+            } else {
+                // Reached target, clear it
+                this.hasTarget = false;
+            }
+        } else {
+            // Normal movement
+            this.bodyPos.x += this.velocity.x * (deltaTime / 1000);
+            this.bodyPos.y += this.velocity.y * (deltaTime / 1000);
+        }
 
         // Keep spider within reasonable bounds (optional boundary)
         this.constrainToView(paperViewRect);
@@ -331,6 +413,7 @@ class SpiderCrawler {
         if (this.thread.bob > Math.PI * 2) this.thread.bob -= Math.PI * 2;
 
         // Check if thread should snap
+        // Use absolute position for comparison since thread ends above anchor when negative
         const threadEndY = -CONFIG.threadLength +
                           Math.sin(this.thread.bob) * 10 + // Small bounce
                           this.thread.swayOffset;
@@ -398,14 +481,6 @@ class SpiderCrawler {
                     leg.isStepping = false;
                     leg.stepProgress = 0;
                 }
-
-                // Calculate stepping motion
-                const ease = this.easeInOutSine(leg.stepProgress);
-                const stepHeight = Math.sin(ease * Math.PI) * CONFIG.stepHeight;
-
-                // For now, implement simple IK reaching
-                // In full implementation, this would calculate IK targets
-                // based on gait and body movement
             }
 
             // Calculate target foot position based on gait and body movement
@@ -424,6 +499,7 @@ class SpiderCrawler {
         // 4. Ground adaptation (word positions)
 
         // Convert leg offset to world coordinates
+        // Note: leg.offset is negative for left legs, positive for right legs
         const offsetX = Math.cos(this.bodyAngle) * leg.offset;
         const offsetY = Math.sin(this.bodyAngle) * leg.offset;
 
@@ -443,17 +519,62 @@ class SpiderCrawler {
     }
 
     calculateGaitOffset(leg, dt) {
-        // Simple alternating tetrapod gait
-        // In reality, this would be more complex with proper gait cycles
+        // Proper alternating tetrapod gait implementation
+        // Legs move in coordinated pairs for stability: [LF, RR, LM, RM] vs [RF, LR, LB, RB]
+        // Using leg.index which should be 0-7 for 8 legs
 
-        // For now, return small alternating movement
-        const phase = (leg.index % 2 === 0) ? 0 : 0.5;
-        const timePhase = (performance.now() / 1000) * 0.5 + phase;
-        const sway = Math.sin(timePhase) * 5;
+        // Determine which tetrapod group this leg belongs to
+        // Group A: legs 0, 3, 4, 7 (LF, RR, LM, RB) - indices 0,3,4,7
+        // Group B: legs 1, 2, 5, 6 (RF, LR, LB, RM) - indices 1,2,5,6
+        const groupA = [0, 3, 4, 7];
+        const groupB = [1, 2, 5, 6];
+
+        let isInGroupA = groupA.includes(leg.index);
+        let isInGroupB = groupB.includes(leg.index);
+
+        // Each group alternates with 50% duty cycle
+        const time = performance.now() / 1000;
+        const cycleTime = 0.8; // seconds per full gait cycle (adjustable)
+        const phaseInCycle = (time % cycleTime) / cycleTime;
+
+        let gaitPhase = 0;
+        if (isInGroupA) {
+            // Group A active in first half of cycle
+            gaitPhase = phaseInCycle < 0.5 ? (phaseInCycle * 2) : 0;
+        } else if (isInGroupB) {
+            // Group B active in second half of cycle
+            gaitPhase = phaseInCycle >= 0.5 ? ((phaseInCycle - 0.5) * 2) : 0;
+        }
+
+        // Apply leg-specific offset based on leg position along body
+        // Normalize leg offset to [-0.5, 0.5] range where 0 is center
+        const maxOffset = CONFIG.legSpacing * 7; // Maximum offset from center leg
+        const legPositionFactor = leg.offset / maxOffset; // Normalized to [-0.5, 0.5]
+
+        // Create walking motion: lift-swing-plant-press
+        let sway = 0;
+        let forwardOffset = 0;
+
+        if (gaitPhase > 0 && gaitPhase <= 0.5) {
+            // Lift phase
+            sway = Math.sin(gaitPhase * Math.PI) * CONFIG.stepHeight;
+        } else if (gaitPhase > 0.5 && gaitPhase <= 1.0) {
+            // Swing and plant phase
+            const swingPhase = (gaitPhase - 0.5) * 2; // 0 to 1
+            sway = Math.sin(swingPhase * Math.PI) * CONFIG.stepHeight * 0.5;
+            forwardOffset = swingPhase * CONFIG.legLength[0] * 0.3; // Forward reach
+        }
+
+        // Apply lateral offset for more natural gait
+        const lateralSway = Math.sin(time * 1.5 + leg.index * 0.5) * 1.5;
+
+        // Calculate final offset
+        const xOffset = Math.cos(this.heading) * (forwardOffset * 0.3 + lateralSway * 0.2) + Math.sin(this.heading) * legPositionFactor * 1.5;
+        const yOffset = Math.sin(this.heading) * (forwardOffset * 0.3 + lateralSway * 0.2) - Math.cos(this.heading) * legPositionFactor * 1.5;
 
         return {
-            x: Math.cos(this.heading) * sway * 0.5,
-            y: Math.sin(this.heading) * sway * 0.5
+            x: xOffset,
+            y: yOffset + sway  // Apply vertical sway separately
         };
     }
 
@@ -467,40 +588,39 @@ class SpiderCrawler {
         // Vector from body joint to target
         const dx = targetPos.x - bodyJoint.x;
         const dy = targetPos.y - bodyJoint.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        let distance = Math.sqrt(dx * dx + dy * dy);
 
         // Clamp distance to reachable range
         const maxReach = CONFIG.legLength[0] + CONFIG.legLength[1];
         const minReach = Math.abs(CONFIG.legLength[0] - CONFIG.legLength[1]);
-        let clampedDistance = Math.min(Math.max(distance, minReach), maxReach);
+        distance = Math.min(Math.max(distance, minReach), maxReach);
 
         // If too close, push away slightly
-        if (distance < minReach + 1) {
+        if (distance < minReach + 0.1) {
             const angle = Math.atan2(dy, dx);
-            clampedDistance = minReach + 1;
-            targetPos.x = bodyJoint.x + Math.cos(angle) * clampedDistance;
-            targetPos.y = bodyJoint.y + Math.sin(angle) * clampedDistance;
+            distance = minReach + 0.1;
+            targetPos.x = bodyJoint.x + Math.cos(angle) * distance;
+            targetPos.y = bodyJoint.y + Math.sin(angle) * distance;
         }
 
         // Calculate knee angle using law of cosines
         // cos(angle) = (a² + b² - c²) / (2ab)
         const a = CONFIG.legLength[0];
         const b = CONFIG.legLength[1];
-        const c = clampedDistance;
+        const c = distance;
 
         let kneeAngle;
         if (distance > 0.001) {
             const cosKnee = (a * a + b * b - c * c) / (2 * a * b);
-            // Clamp to valid range
+            // Clamp to valid range [-1, 1] for acos
             const clampedCos = Math.max(-1, Math.min(1, cosKnee));
             kneeAngle = Math.acos(clampedCos);
         } else {
-            kneeAngle = Math.PI; // Straight leg
+            kneeAngle = 0; // Leg fully extended
         }
 
         // Calculate actual knee bend (we want it to bend inward)
         const bendDirection = leg.side === 'left' ? 1 : -1; // Left legs bend right, right legs bend left
-        const actualKneeAngle = Math.PI - kneeAngle; // Convert to bend amount
 
         // Calculate angle from body joint to target
         const targetAngle = Math.atan2(targetPos.y - bodyJoint.y, targetPos.x - bodyJoint.x);
@@ -509,16 +629,16 @@ class SpiderCrawler {
         leg.joints[1].x = bodyJoint.x + Math.cos(targetAngle) * a;
         leg.joints[1].y = bodyJoint.y + Math.sin(targetAngle) * a;
 
-        // Calculate foot position
+        // Calculate foot position (initially at target)
         leg.joints[2].x = targetPos.x;
         leg.joints[2].y = targetPos.y;
 
-        // Apply knee bend
-        const bendAngle = targetAngle + (bendDirection * actualKneeAngle * 0.5);
-        leg.joints[1].x = bodyJoint.x + Math.cos(bendAngle) * a * 0.8;
-        leg.joints[1].y = bodyJoint.y + Math.sin(bendAngle) * a * 0.8;
+        // Apply knee bend - adjust knee position outward, then recalculate foot
+        const bendAngle = targetAngle + (bendDirection * kneeAngle * 0.5);
+        leg.joints[1].x = bodyJoint.x + Math.cos(bendAngle) * a;
+        leg.joints[1].y = bodyJoint.y + Math.sin(bendAngle) * a;
 
-        // Recalculate foot to maintain length
+        // Recalculate foot to maintain lower leg length
         const dx2 = leg.joints[2].x - leg.joints[1].x;
         const dy2 = leg.joints[2].y - leg.joints[1].y;
         const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
@@ -526,6 +646,10 @@ class SpiderCrawler {
         if (len2 > 0.001) {
             leg.joints[2].x = leg.joints[1].x + (dx2 / len2) * b;
             leg.joints[2].y = leg.joints[1].y + (dy2 / len2) * b;
+        } else {
+            // Fallback if calculation fails
+            leg.joints[2].x = targetPos.x;
+            leg.joints[2].y = targetPos.y;
         }
     }
 
@@ -559,10 +683,12 @@ class SpiderCrawler {
                     if (distance > 30) { // Threshold for reflow
                         // Release foot and let it step to new position
                         foot.wordIndex = null;
+                        foot.silkAge = 0; // Reset silk age when releasing
                     }
                 } else {
                     // Word span no longer exists
                     foot.wordIndex = null;
+                    foot.silkAge = 0; // Reset silk age when releasing
                 }
             }
 
@@ -619,17 +745,31 @@ class SpiderCrawler {
         const dpr = Math.min(window.devicePixelRatio || 1, CONFIG.maxDPR);
         this.ctx.scale(dpr, dpr);
 
-        // Draw spider body
-        this.drawBody();
+        // Draw spider using SpiderDrawer if available
+        if (SpiderDrawer) {
+            const spiderState = {
+                thread: this.thread,
+                body: { x: this.bodyPos.x, y: this.bodyPos.y, angle: this.bodyAngle },
+                legs: this.legs,
+                feet: this.feet
+            };
 
-        // Draw legs
-        this.drawLegs();
+            const drawer = new SpiderDrawer(this.ctx, CONFIG);
+            drawer.drawSpider(spiderState);
+        } else {
+            // Fallback to original drawing methods
+            // Draw spider body
+            this.drawBody();
 
-        // Draw silk thread
-        this.drawThread();
+            // Draw legs
+            this.drawLegs();
 
-        // Draw silk trails from abdomen to touched words
-        this.drawSilkTrails();
+            // Draw silk thread
+            this.drawThread();
+
+            // Draw silk trails from abdomen to touched words
+            this.drawSilkTrails();
+        }
 
         // Draw debug info if enabled
         if (CONFIG.debug) {
@@ -822,6 +962,17 @@ class SpiderCrawler {
 
     getBodyPosition() {
         return { ...this.bodyPos };
+    }
+
+    // Set target position for spider to move towards (used for key phrase navigation)
+    setTargetPosition(x, y) {
+        this.targetPosition = { x, y };
+        this.hasTarget = true;
+    }
+
+    // Clear target position
+    clearTargetPosition() {
+        this.hasTarget = false;
     }
 
     attachFootToWord(legIndex, wordIndex, localOffset) {

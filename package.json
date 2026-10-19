@@ -1,0 +1,23 @@
+{
+  "name": "rcrawler",
+  "version": "1.0.0",
+  "description": "A browser app where a procedurally animated, inverse-kinematics spider drops onto a real ML paper from arXiv on a silk thread. It walks across the paper, plants its feet on actual words, and marks up what it touches like a researcher annotating. As it crawls into each section, Claude explains that section in plain English in a side panel.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giri0712/rcrawler.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/giri0712/rcrawler/issues"
+  },
+  "homepage": "https://github.com/giri0712/rcrawler#readme"
+}

@@ -82,29 +82,112 @@ class PaperLoader {
             });
         });
 
-        // Look for section tags
-        const sectionEls = doc.querySelectorAll('.ltx_section');
-        sectionEls.forEach((el, index) => {
-            const titleEl = el.querySelector('.ltx_title');
-            if (!titleEl) return;
+        // Look for all section-like tags in hierarchical order
+        const sectionSelectors = [
+            '.ltx_section',          // section
+            '.ltx_subsection',       // subsection
+            '.ltx_subsubsection',    // subsubsection
+            '.ltx_paragraph',        // paragraph
+            '.ltx_subparagraph'      // subparagraph
+        ];
 
-            // Determine level based on class or hierarchy
-            let level = 1;
-            if (el.classList.contains('ltx_subsection')) level = 2;
-            else if (el.classList.contains('ltx_subsubsection')) level = 3;
+        let sectionIndex = 0;
+        sectionSelectors.forEach((selector, levelIndex) => {
+            // Level: 1=section, 2=subsection, 3=subsubsection, 4=paragraph, 5=subparagraph
+            const level = levelIndex + 1;
+            const elements = doc.querySelectorAll(selector);
 
-            sections.push({
-                id: `section-${index}-${Date.now()}-${Math.random()}`,
-                title: titleEl.textContent.trim(),
-                slug: this.createSlug(titleEl.textContent.trim()),
-                level: level,
-                text: el.textContent.trim(),
-                startEl: el,
-                endEl: el
+            elements.forEach((el, index) => {
+                const titleEl = el.querySelector('.ltx_title');
+                if (!titleEl) return;
+
+                // Find the actual content boundary for this section
+                const contentEndEl = this.findSectionEndEl(el, level, doc);
+
+                sections.push({
+                    id: `${selector.replace('.', '')}-${Date.now()}-${Math.random()}-${sectionIndex}`,
+                    title: titleEl.textContent.trim(),
+                    slug: this.createSlug(titleEl.textContent.trim()),
+                    level: level,
+                    text: this.getSectionTextContent(el, contentEndEl),
+                    startEl: el,
+                    endEl: contentEndEl || el
+                });
+
+                sectionIndex++;
             });
         });
 
         return sections;
+    }
+
+    /**
+     * Find the end element for a section by looking for next sibling of same or higher level
+     */
+    findSectionEndEl(startEl, level, doc) {
+        let current = startEl.nextElementSibling;
+
+        while (current) {
+            // Check if this element is a section header of same or higher level
+            const isSectionHeader = current.querySelector('.ltx_title') &&
+                                  this.isSectionElement(current);
+
+            if (isSectionHeader) {
+                const elementLevel = this.getSectionLevel(current);
+                if (elementLevel <= level) {
+                    // Found a sibling of same or higher level - this is our boundary
+                    return current.previousElementSibling;
+                }
+            }
+
+            current = current.nextElementSibling;
+        }
+
+        // If no next section found, return the last element in document
+        return doc.body.lastElementChild;
+    }
+
+    /**
+     * Check if element is a LaTeXML section element
+     */
+    isSectionElement(element) {
+        return element.classList.contains('ltx_section') ||
+               element.classList.contains('ltx_subsection') ||
+               element.classList.contains('ltx_subsubsection') ||
+               element.classList.contains('ltx_paragraph') ||
+               element.classList.contains('ltx_subparagraph');
+    }
+
+    /**
+     * Get the level of a LaTeXML section element
+     */
+    getSectionLevel(element) {
+        if (element.classList.contains('ltx_subsubsection')) return 3;
+        if (element.classList.contains('ltx_subsection')) return 2;
+        if (element.classList.contains('ltx_section')) return 1;
+        if (element.classList.contains('ltx_paragraph')) return 4;
+        if (element.classList.contains('ltx_subparagraph')) return 5;
+        return 1; // default
+    }
+
+    /**
+     * Extract text content from start element to end element (inclusive)
+     */
+    getSectionTextContent(startEl, endEl) {
+        if (!startEl) return '';
+        if (!endEl) return startEl.textContent.trim();
+
+        const textContent = [];
+        let current = startEl;
+
+        while (current) {
+            textContent.push(current.textContent.trim());
+
+            if (current === endEl) break;
+            current = current.nextElementSibling;
+        }
+
+        return textContent.join(' ').trim();
     }
 
     /**
